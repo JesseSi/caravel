@@ -1433,7 +1433,6 @@ class Caravel(BaseCaravelView):
             schema=request.form.get('schema'),
             select_as_cta=request.form.get('select_as_cta') == 'true',
             start_time=datetime.now(),
-            status=models.QueryStatus.IN_PROGRESS,
             tab_name=request.form.get('tab'),
             sql_editor_id=request.form.get('sql_editor_id'),
             tmp_table_name=request.form.get('tmp_table_name'),
@@ -1442,7 +1441,6 @@ class Caravel(BaseCaravelView):
         )
         session.add(query)
         session.commit()
-        session.flush()
         query_id = query.id
 
         # Async request.
@@ -1460,9 +1458,11 @@ class Caravel(BaseCaravelView):
         try:
             data = sql_lab.get_sql_results(query_id)
         except Exception as e:
-            return Response(json.dumps({'error': "{}".format(e)}),
-                            status=500,
-                            mimetype = "application/json")
+            logging.exception(e)
+            return Response(
+                json.dumps({'error': "{}".format(e)}),
+                status=500,
+                mimetype = "application/json")
         data['query'] = query.to_dict()
         return Response(
             json.dumps(data, default=utils.json_int_dttm_ser, allow_nan=False),

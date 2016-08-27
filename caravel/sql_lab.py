@@ -3,6 +3,9 @@ from datetime import datetime
 import pandas as pd
 import logging
 from caravel import  app, db, models, utils
+import time
+
+QueryStatus = models.QueryStatus
 
 
 celery_app = celery.Celery(config_source=app.config.get('CELERY_CONFIG'))
@@ -30,14 +33,14 @@ def create_table_as(sql, table_name, override=False):
     if is_query_select(sql):
         if override:
             exec_sql = 'DROP TABLE IF EXISTS {};\n'.format(table_name)
-        exec_sql += "CREATE TABLE {table_name} AS {sql}"
+        exec_sql += "CREATE TABLE {table_name} AS \n{sql}"
     else:
         raise Exception("Could not generate CREATE TABLE statement")
     return exec_sql.format(**locals())
 
 
 @celery_app.task
-def get_sql_results(query_id):
+def get_sql_results(query_id, return_results=True):
     """Executes the sql query returns the results."""
     db.session.commit()  # HACK
     q = db.session.query(models.Query).all()
@@ -63,29 +66,36 @@ def get_sql_results(query_id):
             logging.info("Running query: \n{}".format(executed_sql))
             result_proxy = engine.execute(query.executed_sql, schema=query.schema)
         except Exception as e:
+            logging.exception(e)
             query.error_message = utils.error_msg_from_exception(e)
-            query.status = models.QueryStatus.FAILED
+            query.status = QueryStatus.FAILED
             query.tmp_table_name = None
             db.session.commit()
             raise Exception(query.error_message)
 
         cursor = result_proxy.cursor
+        query.status = QueryStatus.RUNNING
+        db.session.flush()
         if hasattr(cursor, "poll"):
-            query_stats = cursor.poll()
+            polled = cursor.poll()
             # poll returns dict -- JSON status information or ``None``
             # if the query is done
             # https://github.com/dropbox/PyHive/blob/
             # b34bdbf51378b3979eaf5eca9e956f06ddc36ca0/pyhive/presto.py#L178
-            while query_stats:
+            while polled:
                 # Update the object and wait for the kill signal.
-                completed_splits = float(query_stats['stats']['completedSplits'])
-                total_splits = float(query_stats['stats']['totalSplits'])
-                progress = 100 * completed_splits / total_splits
-                if progress > self._query.progress:
-                    query.progress = progress
+                stats = polled.get('stats', {})
+                if stats:
+                    completed_splits = float(stats.get('completedSplits'))
+                    total_splits = float(stats.get('totalSplits'))
+                    if total_splits and completed_splits:
+                        progress = 100 * (completed_splits / total_splits)
+                        if progress > query.progress:
+                            query.progress = progress
+                        db.session.commit()
+                time.sleep(200)
 
-                db.session.commit()
-                query_stats = cursor.poll()
+                polled = cursor.poll()
                 # TODO(b.kyryliuk): check for the kill signal.
 
         columns = None
@@ -100,7 +110,7 @@ def get_sql_results(query_id):
 
         query.rows = result_proxy.rowcount
         query.progress = 100
-        query.status = models.QueryStatus.FINISHED
+        query.status = QueryStatus.SUCCESS
         if query.rows == -1 and data:
             # Presto doesn't provide result_proxy.row_count
             query.rows = len(data)
@@ -117,9 +127,10 @@ def get_sql_results(query_id):
         'query_id': query.id,
         'status': query.status,
     }
-    if query.status == models.QueryStatus.FINISHED:
+    if query.status == models.QueryStatus.SUCCESS:
         payload['data'] = data
         payload['columns'] = columns
     else:
         payload['error'] = query.error_message
-    return payload
+    if return_results:
+        return payload

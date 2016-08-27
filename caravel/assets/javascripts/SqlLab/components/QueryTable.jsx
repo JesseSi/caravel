@@ -6,6 +6,7 @@ import * as Actions from '../actions';
 
 import moment from 'moment';
 import { Table } from 'reactable';
+import { ProgressBar } from 'react-bootstrap';
 
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { github } from 'react-syntax-highlighter/dist/styles';
@@ -30,6 +31,9 @@ class QueryTable extends React.Component {
     this.setState({ showVisualizeModal: true });
     this.setState({ activeQuery: query });
   }
+  restoreSql(query) {
+    this.props.actions.queryEditorSetSql({ id: query.sqlEditorId }, query.sql);
+  }
   notImplemented() {
     alert('Not implemented yet!');
   }
@@ -43,39 +47,58 @@ class QueryTable extends React.Component {
         q.duration = duration.format('HH:mm:ss.SS');
       }
       q.started = moment.utc(q.startDttm).format('HH:mm:ss');
-      q.sql = <SyntaxHighlighter language="sql" style={github}>{q.sql}</SyntaxHighlighter>;
+      const source = q.ctas ? q.executedSql : q.sql;
+      q.sql = (
+        <SyntaxHighlighter language="sql" style={github}>
+          {source || ''}
+        </SyntaxHighlighter>
+      );
+      q.output = q.tempTable;
+      q.progress = (
+        <ProgressBar
+          style={{ width: '75px' }}
+          striped
+          now={q.progress}
+          label={`${q.progress}%`}
+        />
+      );
+      let errorTooltip;
+      if (q.errorMessage) {
+        errorTooltip = (
+          <Link tooltip={q.errorMessage}>
+            <i className="fa fa-exclamation-circle text-danger" />
+          </Link>
+        );
+      }
       q.state = (
-        <span
-          className={"label label-" + STATE_BSSTYLE_MAP[q.state]}
-        >
-          {q.state}
-        </span>
+        <div>
+          <span className={'m-r-3 label label-' + STATE_BSSTYLE_MAP[q.state]}>
+            {q.state}
+          </span>
+          {errorTooltip}
+        </div>
       );
       q.actions = (
-        <div>
+        <div style={{ width: '75px' }}>
           <Link
-            className="fa fa-line-chart"
+            className="fa fa-line-chart m-r-3"
             tooltip="Visualize the data out of this query"
             onClick={this.showVisualizeModal.bind(this, query)}
-            href="#"
           />
           <Link
-            className="fa fa-pencil"
-            onClick={self.notImplemented}
+            className="fa fa-pencil m-r-3"
+            onClick={this.restoreSql.bind(this, query)}
             tooltip="Overwrite text in editor with a query on this table"
             placement="top"
-            href="#"
           />
           <Link
-            className="fa fa-plus-circle"
+            className="fa fa-plus-circle m-r-3"
             onClick={self.notImplemented}
             tooltip="Run query in a new tab"
             placement="top"
-            href="#"
           />
           <Link
-            className="fa fa-trash"
-            href="#"
+            className="fa fa-trash m-r-3"
             tooltip="Remove query from log"
             onClick={this.props.actions.removeQuery.bind(this, query)}
           />
@@ -92,7 +115,7 @@ class QueryTable extends React.Component {
           onHide={this.hideVisualizeModal.bind(this)}
         />
         <Table
-          columns={['state', 'started', 'duration', 'progress', 'rows', 'sql', 'actions']}
+          columns={this.props.columns}
           className="table table-condensed"
           data={data}
         />

@@ -27,8 +27,7 @@ class Timer extends React.Component {
   }
   stopwatch() {
     if (this.props && this.props.query) {
-      let fromDttm = (this.props.query.endDttm) ? this.props.query.endDttm : new Date().getTime();
-      const since = (this.props.query.endDttm) ? this.props.query.endDttm : new Date().getTime();
+      const since = (this.props.query.endDttm) ? this.props.query.endDttm : moment.utc().unix();
       const duration = moment.utc(since - this.props.query.startDttm);
       const clockStr = duration.format('HH:mm:ss.SS');
       this.setState({ clockStr });
@@ -43,8 +42,9 @@ class Timer extends React.Component {
     }
     let timerSpan = null;
     if (this.props && this.props.query) {
+      const bsStyle = STATE_BSSTYLE_MAP[this.props.query.state];
       timerSpan = (
-        <span className={'inlineBlock m-r-5 label label-' + STATE_BSSTYLE_MAP[this.props.query.state]}>
+        <span className={'inlineBlock m-r-5 label label-' + bsStyle}>
           {this.state.clockStr}
         </span>
       );
